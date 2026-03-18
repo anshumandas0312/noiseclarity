@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClearVoice — RNNoise AI Denoiser</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --green:#4ade80;--purple:#818cf8;--red:#f87171;--amber:#fbbf24;
+  --surface:rgba(255,255,255,0.025);--border:rgba(255,255,255,0.07);
+  --text:rgba(255,255,255,0.85);--muted:rgba(255,255,255,0.35);--dim:rgba(255,255,255,0.15);
+}
+html,body{min-height:100vh;background:#08090d;color:var(--text);font-family:'Space Grotesk',sans-serif;-webkit-font-smoothing:antialiased}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(255,255,255,0.015) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.015) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+
+#app{position:relative;z-index:1;max-width:780px;margin:0 auto;padding:0 20px 60px}
+
+/* Header */
+header{padding:24px 0 28px;border-bottom:1px solid rgba(255,255,255,0.05);margin-bottom:28px;display:flex;align-items:center;justify-content:space-between}
+.logo{display:flex;align-items:center;gap:12px}
+.logo-mark{width:36px;height:36px;background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center}
+.logo-name{display:block;font-size:17px;font-weight:600;letter-spacing:-0.02em;color:rgba(255,255,255,0.92)}
+.logo-tag{display:block;font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:.12em;font-family:'JetBrains Mono',monospace}
+.header-right{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted)}
+.status-dot{width:7px;height:7px;border-radius:50%;background:#444;display:inline-block;flex-shrink:0;transition:background .3s}
+.status-dot.pulse{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.mono{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.04em}
+.main{display:flex;flex-direction:column;gap:14px}
+
+/* Drop zone */
+.drop-zone{border:1.5px dashed rgba(255,255,255,0.1);border-radius:14px;padding:52px 24px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;background:rgba(255,255,255,0.015)}
+.drop-zone:hover,.drop-zone.drag-over{border-color:rgba(129,140,248,.5);background:rgba(129,140,248,.04)}
+.drop-icon{color:rgba(255,255,255,.2);margin-bottom:16px;display:flex;justify-content:center}
+.drop-title{font-size:15px;font-weight:500;color:rgba(255,255,255,.7);margin-bottom:6px}
+.drop-sub{font-size:12px;color:rgba(255,255,255,.25);font-family:'JetBrains Mono',monospace;letter-spacing:.04em}
+
+/* Card */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px}
+.card.green{border-color:rgba(74,222,128,.15);background:rgba(74,222,128,.03)}
+.section-label{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:rgba(255,255,255,.3);margin-bottom:10px}
+
+/* Progress */
+.progress-track{height:3px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden;margin:10px 0 6px}
+.progress-fill{height:100%;border-radius:2px;transition:width .3s ease}
+.progress-row{display:flex;justify-content:space-between;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--muted)}
+.vad-dot{width:6px;height:6px;border-radius:50%;display:inline-block;transition:background .3s}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;font-family:inherit;border:none}
+.btn-green{background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3);color:var(--green)}
+.btn-green:hover{background:rgba(74,222,128,.18);border-color:rgba(74,222,128,.5)}
+.btn-ghost{padding:4px 10px;background:transparent;border:1px solid rgba(255,255,255,.1);border-radius:6px;color:var(--muted);font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace;transition:all .15s}
+.btn-ghost:hover{border-color:rgba(255,255,255,.25);color:rgba(255,255,255,.7)}
+
+/* Waveform */
+canvas.wave{width:100%;display:block;border-radius:6px;border:1px solid rgba(255,255,255,.06)}
+.wave-label{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+
+/* Audio player */
+.audio-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.audio-block{padding:10px 12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:8px;display:flex;flex-direction:column;gap:6px}
+audio{width:100%;height:32px}
+
+/* Metric cards */
+.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.metric{padding:10px 12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:8px}
+.metric.accent{border-color:rgba(74,222,128,.2)}
+.metric-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px}
+.metric-value{font-size:20px;font-weight:500;color:rgba(255,255,255,.9);line-height:1}
+.metric.accent .metric-value{color:var(--green)}
+.metric-sub{font-size:10px;color:var(--dim);margin-top:2px;font-family:'JetBrains Mono',monospace}
+
+/* Badges */
+.badge{font-size:10px;font-family:'JetBrains Mono',monospace;padding:2px 8px;border-radius:4px;letter-spacing:.04em;display:inline-block}
+.badge-purple{background:rgba(129,140,248,.1);color:var(--purple)}
+.badge-green{background:rgba(74,222,128,.1);color:var(--green)}
+.badge-gray{background:rgba(255,255,255,.07);color:var(--muted)}
+
+/* Telemetry */
+.telemetry{background:rgba(10,12,18,.8);border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden}
+.tele-header{padding:14px 18px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(255,255,255,.05)}
+.tele-body{padding:4px 18px 18px}
+.divider{display:flex;align-items:center;gap:8px;font-size:10px;color:rgba(255,255,255,.3);text-transform:uppercase;letter-spacing:.12em;margin:18px 0 10px}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.06)}
+
+/* Info cards */
+.info-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:10px}
+.info-card{padding:16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);border-radius:10px}
+.info-icon{font-size:18px;margin-bottom:10px}
+.info-title{font-size:12px;font-weight:500;color:rgba(255,255,255,.7);margin-bottom:6px}
+.info-desc{font-size:11.5px;color:rgba(255,255,255,.3);line-height:1.6}
+
+/* Error */
+.error-banner{display:flex;align-items:center;gap:8px;padding:12px 16px;background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.2);border-radius:8px;color:#fca5a5;font-size:13px}
+.success-icon{width:22px;height:22px;background:rgba(74,222,128,.15);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:var(--green)}
+
+/* VAD chart */
+canvas.vad{width:100%;display:block;border-radius:4px;border:1px solid rgba(255,255,255,.06)}
+canvas.spec{width:100%;display:block;border-radius:4px}
+
+details summary{cursor:pointer;color:var(--muted);font-size:10px;letter-spacing:.08em;user-select:none;list-style:none;font-family:'JetBrains Mono',monospace}
+pre.json{margin-top:8px;padding:12px;background:rgba(0,0,0,.4);border-radius:6px;font-size:10px;color:rgba(255,255,255,.5);overflow:auto;max-height:200px;line-height:1.6;font-family:'JetBrains Mono',monospace}
+
+@media(max-width:600px){.metric-grid{grid-template-columns:1fr 1fr}.info-grid{grid-template-columns:1fr}.audio-row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- Header -->
+  <header>
+    <div class="logo">
+      <div class="logo-mark">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M2 13s3-6 10-6 10 6 10 6-3 6-10 6-10-6-10-6z" stroke="#4ade80" stroke-width="1.5"/>
+          <circle cx="12" cy="13" r="3" stroke="#4ade80" stroke-width="1.5"/>
+          <path d="M12 4V2M12 24v-2M4 13H2M22 13h-2" stroke="#4ade80" stroke-width="1" opacity=".5"/>
+        </svg>
+      </div>
+      <div>
+        <span class="logo-name">ClearVoice</span>
+        <span class="logo-tag">RNNoise · WASM · 48kHz · MLOps</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <span class="status-dot" id="statusDot"></span>
+      <span class="mono" id="statusText">ready</span>
+      <button class="btn-ghost" id="resetBtn" style="display:none" onclick="resetApp()">reset</button>
+      <button class="btn-ghost" id="cancelBtn" style="display:none" onclick="cancelProcessing()">cancel</button>
+    </div>
+  </header>
+
+  <div class="main" id="main">
+    <!-- Drop zone -->
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+      <input type="file" id="fileInput" accept="audio/*" style="display:none" onchange="handleFileSelect(this.files[0])">
+      <div class="drop-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+        </svg>
+      </div>
+      <div class="drop-title">Drop audio file here</div>
+      <div class="drop-sub">or click to browse · WAV · MP3 · OGG · FLAC · AAC</div>
+    </div>
+
+    <!-- Info cards (shown when idle) -->
+    <div class="info-grid" id="infoCards">
+      <div class="info-card">
+        <div class="info-icon">🧠</div>
+        <div class="info-title">RNNoise GRU Model</div>
+        <div class="info-desc">Recurrent neural network from xiph.org. Processes 480-sample frames (~10ms) with preserved GRU state — learns to suppress noise while keeping speech intact.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-icon">⚡</div>
+        <div class="info-title">WebAssembly Runtime</div>
+        <div class="info-desc">Compiled from C via Emscripten. Runs at near-native speed — no server uploads, fully private, works offline. JS spectral-subtraction fallback included.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-icon">📊</div>
+        <div class="info-title">MLOps Telemetry</div>
+        <div class="info-desc">Per-frame VAD scores, SNR estimation, p50/p95 latency, noise reduction in dB. Full observability pipeline surfaced in the UI after every run.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// ClearVoice — RNNoise Audio Denoiser
+// Architecture: Web Audio API → RNNoise WASM (+ JS fallback) → WAV Encoder
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const FRAME_SIZE = 480;           // 10ms @ 48kHz — fixed by RNNoise GRU window
+const SAMPLE_RATE = 48000;        // RNNoise only supports 48kHz
+const MODEL_VERSION = 'rnnoise-0.2-wasm';
+const VAD_THRESHOLD = 0.5;
+
+let abortFlag = false;
+let rnnoiseModule = null;
+let moduleLoadPromise = null;
+let currentOutputURL = null;
+
+// ─── State management ─────────────────────────────────────────────────────────
+const STATES = { IDLE:'idle', LOADING:'loading', DECODING:'decoding', PROCESSING:'processing', DONE:'done', ERROR:'error' };
+let currentState = STATES.IDLE;
+
+function setState(s) {
+  currentState = s;
+  const dot = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  const resetBtn = document.getElementById('resetBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
+  const labels = { idle:'ready', loading:'loading model…', decoding:'decoding audio…', processing:'processing frames…', done:'complete', error:'error' };
+  const colors = { idle:'#444', loading:'#fbbf24', decoding:'#818cf8', processing:'#4ade80', done:'#4ade80', error:'#f87171' };
+  dot.style.background = colors[s] || '#444';
+  dot.className = 'status-dot' + (['loading','decoding','processing'].includes(s) ? ' pulse' : '');
+  text.textContent = labels[s] || s;
+  resetBtn.style.display = (s === STATES.DONE || s === STATES.ERROR) ? '' : 'none';
+  cancelBtn.style.display = ['loading','decoding','processing'].includes(s) ? '' : 'none';
+}
+
+function resetApp() {
+  abortFlag = true;
+  if (currentOutputURL) { URL.revokeObjectURL(currentOutputURL); currentOutputURL = null; }
+  document.getElementById('fileInput').value = '';
+  // Remove all dynamic sections
+  ['fileCard','progressCard','waveCard','resultsCard','telemetryCard'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+  });
+  document.getElementById('dropZone').style.display = '';
+  document.getElementById('infoCards').style.display = '';
+  setState(STATES.IDLE);
+}
+
+function cancelProcessing() { abortFlag = true; setState(STATES.IDLE); }
+
+// ─── Drag & drop ──────────────────────────────────────────────────────────────
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) handleFileSelect(e.dataTransfer.files[0]);
+});
+
+// ─── RNNoise WASM loader ───────────────────────────────────────────────────────
+async function loadModule() {
+  if (rnnoiseModule) return rnnoiseModule;
+  if (moduleLoadPromise) return moduleLoadPromise;
+  moduleLoadPromise = (async () => {
+    try {
+      // Try loading via ESM from CDN
+      const mod = await import('https://cdn.jsdelivr.net/npm/@jitsi/rnnoise-wasm@0.0.2/dist/index.js').catch(() => null);
+      if (mod) {
+        rnnoiseModule = mod.default ? await mod.default() : await mod();
+        console.info('[RNNoise] WASM loaded:', MODEL_VERSION);
+        return rnnoiseModule;
+      }
+      throw new Error('CDN unavailable');
+    } catch (e) {
+      console.warn('[RNNoise] WASM unavailable, using JS spectral subtraction fallback:', e.message);
+      rnnoiseModule = createJSFallback();
+      return rnnoiseModule;
+    }
+  })();
+  return moduleLoadPromise;
+}
+
+// Preload on page init
+loadModule().catch(() => {});
+
+// ─── JS Fallback Engine (spectral subtraction) ────────────────────────────────
+function createJSFallback() {
+  return {
+    _isFallback: true,
+    _version: 'spectral-subtraction-js-v1',
+    createDenoiseState() {
+      let profile = null, count = 0;
+      const PROFILE_FRAMES = 12;
+      return {
+        processFrame(frame) {
+          const N = Math.min(frame.length, 64);
+          const mag = new Float32Array(N / 2);
+          for (let k = 0; k < N/2; k++) {
+            let re=0, im=0;
+            for (let n=0; n<N; n++) {
+              const a = (2*Math.PI*k*n)/N;
+              re += frame[n]*Math.cos(a);
+              im -= frame[n]*Math.sin(a);
+            }
+            mag[k] = Math.sqrt(re*re+im*im)/N;
+          }
+          if (count < PROFILE_FRAMES) {
+            if (!profile) profile = new Float32Array(mag.length);
+            for (let i=0; i<mag.length; i++) profile[i] += mag[i]/PROFILE_FRAMES;
+            count++;
+            return 0.1;
+          }
+          let speech=0, total=0;
+          for (let i=0; i<frame.length; i++) {
+            const ni = profile[Math.floor(i*mag.length/frame.length)] || 0.001;
+            const snr = Math.abs(frame[i]) / (ni + 1e-10);
+            const g = Math.max(0, 1 - 1/(snr+1));
+            frame[i] *= g;
+            if (g > 0.5) speech += frame[i]*frame[i];
+            total += frame[i]*frame[i];
+          }
+          return total > 0 ? Math.min(1, speech/total) : 0;
+        },
+        destroy() {}
+      };
+    }
+  };
+}
+
+// ─── Audio decode ─────────────────────────────────────────────────────────────
+async function decodeAudio(buf) {
+  const tempCtx = new AudioContext();
+  const decoded = await tempCtx.decodeAudioData(buf.slice(0));
+  await tempCtx.close();
+  const sr = decoded.sampleRate;
+  const dur = decoded.duration;
+  const ch = decoded.numberOfChannels;
+
+  let pcm;
+  if (sr === SAMPLE_RATE) {
+    // Mix to mono at 48kHz
+    pcm = new Float32Array(decoded.length);
+    const g = 1/Math.sqrt(ch);
+    for (let c=0; c<ch; c++) { const d=decoded.getChannelData(c); for(let i=0;i<d.length;i++) pcm[i]+=d[i]*g; }
+  } else {
+    // Resample via OfflineAudioContext
+    const len = Math.ceil(dur * SAMPLE_RATE);
+    const off = new OfflineAudioContext(1, len, SAMPLE_RATE);
+    const src = off.createBufferSource();
+    src.buffer = decoded;
+    src.connect(off.destination);
+    src.start(0);
+    const rendered = await off.startRendering();
+    pcm = rendered.getChannelData(0);
+  }
+  return { pcm, originalSR: sr, duration: dur, channels: ch };
+}
+
+// ─── Core denoising pipeline ──────────────────────────────────────────────────
+async function denoisePCM(pcm, onProgress) {
+  const mod = await loadModule();
+  const t0 = performance.now();
+  const total = Math.ceil(pcm.length / FRAME_SIZE);
+  const clean = new Float32Array(pcm.length);
+  const vadScores = [];
+  const latencies = [];
+  let inRMS = 0;
+  for (let i=0; i<pcm.length; i++) inRMS += pcm[i]*pcm[i];
+  inRMS = Math.sqrt(inRMS/pcm.length);
+
+  const state = mod.createDenoiseState();
+  try {
+    for (let fi=0; fi<total; fi++) {
+      const ft = performance.now();
+      const off = fi * FRAME_SIZE;
+      const frame = new Float32Array(FRAME_SIZE);
+      const avail = Math.min(FRAME_SIZE, pcm.length - off);
+      frame.set(pcm.subarray(off, off+avail));
+      for (let i=0; i<FRAME_SIZE; i++) frame[i] *= 32768; // scale to 16-bit range
+      const vad = state.processFrame(frame);
+      for (let i=0; i<avail; i++) clean[off+i] = frame[i]/32768;
+      vadScores.push(vad);
+      latencies.push(performance.now()-ft);
+      if (fi%40===0 || fi===total-1) {
+        onProgress?.(fi+1, total, vad);
+        await new Promise(r => setTimeout(r,0));
+        if (abortFlag) break;
+      }
+    }
+  } finally { state.destroy(); }
+
+  let outRMS = 0;
+  for (let i=0; i<clean.length; i++) outRMS += clean[i]*clean[i];
+  outRMS = Math.sqrt(outRMS/clean.length);
+  const elapsed = performance.now()-t0;
+  const sorted = [...latencies].sort((a,b)=>a-b);
+
+  const speechFrames = vadScores.filter(v=>v>VAD_THRESHOLD).length;
+  const telemetry = {
+    model: { version: mod._isFallback ? mod._version : MODEL_VERSION, type: mod._isFallback ? 'spectral-subtraction-js' : 'rnnoise-gru-wasm', frameSize: FRAME_SIZE, sampleRate: SAMPLE_RATE },
+    vad: { scores: vadScores, speechFrames, totalFrames: total, speechRatio: speechFrames/total, meanScore: vadScores.reduce((a,b)=>a+b,0)/total },
+    performance: { totalTimeMs: Math.round(elapsed), audioDurationS: Math.round(pcm.length/SAMPLE_RATE*100)/100, realTimeFactor: Math.round(elapsed/1000/(pcm.length/SAMPLE_RATE)*1000)/1000,
+      frameLatency: { p50: Math.round((sorted[Math.floor(sorted.length*.5)]||0)*100)/100, p95: Math.round((sorted[Math.floor(sorted.length*.95)]||0)*100)/100, maxMs: Math.round((sorted[sorted.length-1]||0)*100)/100 } },
+    quality: { inputRMS: Math.round(inRMS*10000)/10000, outputRMS: Math.round(outRMS*10000)/10000,
+      estimatedNoiseReductionDB: Math.round(Math.max(0, 20*Math.log10((inRMS+1e-10)/(outRMS+1e-10)))*10)/10,
+      estimatedSNRDB: Math.round(20*Math.log10(outRMS/(Math.abs(inRMS-outRMS)+1e-10))*10)/10 },
+    timestamp: new Date().toISOString(),
+  };
+  return { clean, telemetry };
+}
+
+// ─── WAV encoder ─────────────────────────────────────────────────────────────
+function encodeWAV(pcm, sr=48000) {
+  const n=pcm.length, buf=new ArrayBuffer(44+n*2), v=new DataView(buf);
+  const ws=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i))};
+  ws(0,'RIFF'); v.setUint32(4,36+n*2,true); ws(8,'WAVE');
+  ws(12,'fmt '); v.setUint32(16,16,true); v.setUint16(20,1,true);
+  v.setUint16(22,1,true); v.setUint32(24,sr,true); v.setUint32(28,sr*2,true);
+  v.setUint16(32,2,true); v.setUint16(34,16,true);
+  ws(36,'data'); v.setUint32(40,n*2,true);
+  const i16=new Int16Array(buf,44);
+  for(let i=0;i<n;i++){ const d=(Math.random()+Math.random()-1)/32768; i16[i]=Math.round(Math.max(-1,Math.min(1,pcm[i]+d))*32767); }
+  return buf;
+}
+
+// ─── Waveform helpers ─────────────────────────────────────────────────────────
+function computeWaveform(pcm, pts=512) {
+  const bs=Math.floor(pcm.length/pts), w=new Float32Array(pts);
+  for(let i=0;i<pts;i++){let r=0;for(let j=i*bs;j<Math.min((i+1)*bs,pcm.length);j++)r+=pcm[j]*pcm[j];w[i]=Math.sqrt(r/bs);}
+  return w;
+}
+
+function computeSpectrum(pcm, bands=64) {
+  const N=Math.min(pcm.length,2048);
+  const seg=pcm.subarray(Math.max(0,Math.floor(pcm.length/2)-N/2),Math.floor(pcm.length/2)+N/2);
+  const win=new Float32Array(seg.length);
+  for(let i=0;i<seg.length;i++) win[i]=seg[i]*.5*(1-Math.cos(2*Math.PI*i/(seg.length-1)));
+  const spec=new Float32Array(bands);
+  const step=Math.floor(N/2/bands);
+  for(let k=0;k<bands;k++){let re=0,im=0;for(let n=0;n<win.length;n++){const a=(2*Math.PI*k*step*n)/win.length;re+=win[n]*Math.cos(a);im-=win[n]*Math.sin(a);}const m=Math.sqrt(re*re+im*im)/win.length;spec[k]=m>1e-10?20*Math.log10(m):-80;}
+  return spec;
+}
+
+// ─── Canvas rendering ─────────────────────────────────────────────────────────
+function drawWaveform(canvas, data, color='#818cf8') {
+  if (!canvas||!data) return;
+  const ctx=canvas.getContext('2d'),dpr=devicePixelRatio||1,w=canvas.offsetWidth,h=canvas.offsetHeight;
+  canvas.width=w*dpr; canvas.height=h*dpr; ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle='rgba(255,255,255,.06)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0,h/2); ctx.lineTo(w,h/2); ctx.stroke();
+  const bw=w/data.length;
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,color+'cc'); g.addColorStop(.5,color); g.addColorStop(1,color+'cc');
+  ctx.fillStyle=g;
+  for(let i=0;i<data.length;i++){const amp=Math.min(1,data[i]||0),bh=Math.max(2,amp*h*.9);ctx.fillRect(i*bw,(h-bh)/2,Math.max(1,bw-.5),bh);}
+}
+
+function drawSpectrum(canvas, data) {
+  if (!canvas||!data) return;
+  const ctx=canvas.getContext('2d'),dpr=devicePixelRatio||1,w=canvas.offsetWidth,h=canvas.offsetHeight;
+  canvas.width=w*dpr; canvas.height=h*dpr; ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+  const bw=w/data.length;
+  for(let i=0;i<data.length;i++){const db=Math.max(-80,Math.min(0,data[i])),n=(db+80)/80,bh=Math.max(2,n*h),hue=240+(i/data.length)*80;ctx.fillStyle=`hsla(${hue},70%,65%,.85)`;ctx.fillRect(i*bw,h-bh,Math.max(1,bw-1),bh);}
+}
+
+function drawVAD(canvas, scores) {
+  if (!canvas||!scores||!scores.length) return;
+  const ctx=canvas.getContext('2d'),dpr=devicePixelRatio||1,w=canvas.offsetWidth,h=canvas.offsetHeight;
+  canvas.width=w*dpr; canvas.height=h*dpr; ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+  // threshold line
+  ctx.strokeStyle='rgba(251,191,36,.3)'; ctx.setLineDash([4,4]); ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0,h*.5); ctx.lineTo(w,h*.5); ctx.stroke(); ctx.setLineDash([]);
+  // area
+  const step=w/scores.length;
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'rgba(74,222,128,.6)'); g.addColorStop(1,'rgba(74,222,128,.05)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.moveTo(0,h);
+  for(let i=0;i<scores.length;i++) ctx.lineTo(i*step,h-(scores[i]*h*.9));
+  ctx.lineTo(scores.length*step,h); ctx.closePath(); ctx.fill();
+  // line
+  ctx.strokeStyle='rgba(74,222,128,.8)'; ctx.lineWidth=1; ctx.setLineDash([]);
+  ctx.beginPath();
+  for(let i=0;i<scores.length;i++){const x=i*step,y=h-(scores[i]*h*.9);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+  ctx.stroke();
+}
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
+function formatBytes(b) { if(b<1024)return b+' B'; if(b<1048576)return(b/1024).toFixed(1)+' KB'; return(b/1048576).toFixed(2)+' MB'; }
+
+function inject(html, afterId) {
+  const ref = document.getElementById(afterId);
+  if (!ref) { document.getElementById('main').insertAdjacentHTML('beforeend', html); return; }
+  ref.insertAdjacentHTML('afterend', html);
+}
+
+async function handleFileSelect(file) {
+  if (!file) return;
+  abortFlag = false;
+
+  // Hide drop zone and info cards
+  document.getElementById('dropZone').style.display='none';
+  document.getElementById('infoCards').style.display='none';
+  ['fileCard','progressCard','waveCard','resultsCard','telemetryCard'].forEach(id=>{const e=document.getElementById(id);if(e)e.remove();});
+
+  setState(STATES.LOADING);
+
+  // File card
+  document.getElementById('main').insertAdjacentHTML('beforeend', `
+    <div class="card" id="fileCard">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="badge badge-purple">${(file.type||'audio').split('/').pop().toUpperCase().replace('MPEG','MP3')}</span>
+          <span class="mono" style="font-size:13px;color:rgba(255,255,255,.75);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:400px">${file.name}</span>
+        </div>
+        <span class="mono" style="font-size:11px;color:var(--muted);white-space:nowrap">${formatBytes(file.size)}</span>
+      </div>
+      <div class="progress-track" id="progressTrack" style="margin-top:12px"><div class="progress-fill" id="progressFill" style="width:0%;background:rgba(129,140,248,.6)"></div></div>
+      <div class="progress-row" id="progressRow"><span id="progressLabel">Loading model…</span><span id="vadLabel" style="display:flex;align-items:center;gap:5px">VAD —<span class="vad-dot" id="vadDot" style="background:rgba(255,255,255,.15)"></span></span></div>
+    </div>
+  `);
+
+  function setProgress(pct, label, vad) {
+    const f=document.getElementById('progressFill');
+    const l=document.getElementById('progressLabel');
+    const d=document.getElementById('vadDot');
+    const vl=document.getElementById('vadLabel');
+    if(f) f.style.width=pct+'%';
+    if(l) l.textContent=label;
+    if(d) d.style.background=vad>VAD_THRESHOLD?'#4ade80':'rgba(255,255,255,.15)';
+    if(vl) vl.innerHTML=`VAD ${Math.round((vad||0)*100)}%<span class="vad-dot" style="background:${vad>VAD_THRESHOLD?'#4ade80':'rgba(255,255,255,.15)'}"></span>`;
+  }
+
+  try {
+    // 1. Load model
+    await loadModule();
+    if(abortFlag) return;
+    setProgress(8, 'Decoding audio…', 0);
+    setState(STATES.DECODING);
+
+    // 2. Decode
+    const ab = await file.arrayBuffer();
+    if(abortFlag) return;
+    const { pcm, originalSR, duration, channels } = await decodeAudio(ab);
+    if(abortFlag) return;
+
+    // Compute input waveform
+    const inWave = computeWaveform(pcm, 512);
+    const inSpec = computeSpectrum(pcm, 64);
+
+    // Update file card with metadata
+    document.getElementById('fileCard').querySelector('.mono').parentElement.nextElementSibling.insertAdjacentHTML('afterend',`
+      <div style="margin-top:6px;font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace">${Math.round(duration*100)/100}s · ${originalSR/1000}kHz${channels>1?' · '+channels+'ch':''} → 48kHz mono</div>
+    `);
+
+    // Waveform card
+    document.getElementById('fileCard').insertAdjacentHTML('afterend', `
+      <div class="card" id="waveCard">
+        <div class="section-label">Waveform</div>
+        <div class="wave-label">Input (noisy)</div>
+        <canvas class="wave" id="inWave" style="height:72px;background:rgba(255,255,255,.02)"></canvas>
+        <div id="outWaveWrap" style="display:none;margin-top:10px">
+          <div class="wave-label" style="color:rgba(74,222,128,.7)">Output (denoised)</div>
+          <canvas class="wave" id="outWave" style="height:72px;background:rgba(74,222,128,.03);border-color:rgba(74,222,128,.15)"></canvas>
+        </div>
+      </div>
+    `);
+
+    // Draw input waveform (after card is in DOM)
+    setTimeout(() => drawWaveform(document.getElementById('inWave'), inWave, '#818cf8'), 10);
+
+    setProgress(15, 'Processing frames…', 0);
+    setState(STATES.PROCESSING);
+
+    // 3. Denoise
+    const { clean, telemetry } = await denoisePCM(pcm, (done, total, vad) => {
+      if(abortFlag) return;
+      const pct = 15 + Math.round((done/total)*80);
+      setProgress(pct, `Frame ${done} / ${total}`, vad);
+    });
+    if(abortFlag) return;
+
+    // 4. Encode WAV
+    const wavBuf = encodeWAV(clean, 48000);
+    const blob = new Blob([wavBuf], { type:'audio/wav' });
+    if(currentOutputURL) URL.revokeObjectURL(currentOutputURL);
+    currentOutputURL = URL.createObjectURL(blob);
+
+    const outWave = computeWaveform(clean, 512);
+    const outSpec = computeSpectrum(clean, 64);
+
+    // Show output waveform
+    const outWrap = document.getElementById('outWaveWrap');
+    if(outWrap) outWrap.style.display='';
+    setTimeout(() => drawWaveform(document.getElementById('outWave'), outWave, '#4ade80'), 10);
+
+    // Update progress to 100%
+    setProgress(100, 'Complete', telemetry.vad.meanScore);
+    const pf = document.getElementById('progressFill');
+    if(pf) pf.style.background='rgba(74,222,128,.5)';
+
+    setState(STATES.DONE);
+
+    // 5. Results card
+    const inputURL = URL.createObjectURL(new Blob([await file.arrayBuffer()], {type:'audio/wav'}));
+    document.getElementById('waveCard').insertAdjacentHTML('afterend', `
+      <div class="card green" id="resultsCard">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="success-icon">✓</span>
+            <span style="font-weight:500;color:var(--green)">Noise removed</span>
+            <span class="badge badge-green">${telemetry.quality.estimatedNoiseReductionDB}dB reduction</span>
+          </div>
+          <button class="btn btn-green" onclick="downloadResult()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download WAV
+          </button>
+        </div>
+        <div class="audio-row">
+          <div class="audio-block">
+            <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em">Original</span>
+            <audio controls src="${inputURL}"></audio>
+          </div>
+          <div class="audio-block">
+            <span style="font-size:10px;color:rgba(74,222,128,.7);text-transform:uppercase;letter-spacing:.1em">Denoised</span>
+            <audio controls src="${currentOutputURL}"></audio>
+          </div>
+        </div>
+      </div>
+    `);
+
+    // 6. Telemetry card
+    const speechPct = Math.round(telemetry.vad.speechRatio*100);
+    const perf = telemetry.performance;
+    const qual = telemetry.quality;
+    const mod = telemetry.model;
+
+    document.getElementById('resultsCard').insertAdjacentHTML('afterend', `
+      <div class="telemetry" id="telemetryCard">
+        <div class="tele-header" onclick="this.parentElement.classList.toggle('open')">
+          <div style="width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px rgba(74,222,128,.5)"></div>
+          <span style="font-size:12px;font-weight:500;color:rgba(255,255,255,.8);letter-spacing:.05em">MLOps Telemetry</span>
+          <span class="badge badge-green">${mod.type}</span>
+          <span style="margin-left:auto;font-size:11px;color:var(--muted)">▼ expand</span>
+        </div>
+        <div style="padding:12px 18px">
+          <div class="metric-grid">
+            <div class="metric accent"><div class="metric-label">Noise reduced</div><div class="metric-value">${qual.estimatedNoiseReductionDB}<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:2px">dB</span></div></div>
+            <div class="metric"><div class="metric-label">Speech frames</div><div class="metric-value">${speechPct}<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:2px">%</span></div><div class="metric-sub">${telemetry.vad.speechFrames} / ${telemetry.vad.totalFrames}</div></div>
+            <div class="metric"><div class="metric-label">Processing</div><div class="metric-value">${perf.totalTimeMs<1000?perf.totalTimeMs+'ms':(perf.totalTimeMs/1000).toFixed(1)+'s'}</div><div class="metric-sub">${perf.realTimeFactor}× realtime</div></div>
+            <div class="metric"><div class="metric-label">Duration</div><div class="metric-value">${perf.audioDurationS}<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:2px">s</span></div><div class="metric-sub">${mod.sampleRate/1000}kHz</div></div>
+          </div>
+        </div>
+        <div id="teleExpanded" style="display:none;padding:0 18px 18px">
+          <div class="divider">Voice activity detection</div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:6px;font-family:'JetBrains Mono',monospace">
+            <span>Frame-level VAD scores (0–1)</span>
+            <span>Mean ${Math.round(telemetry.vad.meanScore*100)}% · Threshold 0.5</span>
+          </div>
+          <canvas id="vadCanvas" style="height:72px;width:100%;display:block;border-radius:4px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06)"></canvas>
+
+          <div class="divider">Frequency spectrum</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <div style="font-size:10px;color:var(--muted);margin-bottom:5px">Input (noisy)</div>
+              <canvas id="inSpecCanvas" style="height:56px;width:100%;display:block;border-radius:4px"></canvas>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--muted);margin-bottom:5px">Output (clean)</div>
+              <canvas id="outSpecCanvas" style="height:56px;width:100%;display:block;border-radius:4px"></canvas>
+            </div>
+          </div>
+
+          <div class="divider">Model metadata</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span class="badge badge-gray">${mod.version}</span>
+            <span class="badge badge-gray">frame ${mod.frameSize}smp</span>
+            <span class="badge badge-gray">${mod.sampleRate/1000}kHz</span>
+            <span class="badge badge-gray">GRU architecture</span>
+            <span class="badge badge-purple">BSD-3 licensed</span>
+          </div>
+
+          <div class="divider">Frame latency</div>
+          <div class="metric-grid" style="grid-template-columns:repeat(3,1fr)">
+            <div class="metric"><div class="metric-label">p50</div><div class="metric-value">${perf.frameLatency.p50}<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:2px">ms</span></div></div>
+            <div class="metric"><div class="metric-label">p95</div><div class="metric-value">${perf.frameLatency.p95}<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:2px">ms</span></div></div>
+            <div class="metric"><div class="metric-label">max</div><div class="metric-value">${perf.frameLatency.maxMs}<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:2px">ms</span></div></div>
+          </div>
+
+          <div class="divider">Signal quality</div>
+          <div class="metric-grid" style="grid-template-columns:repeat(3,1fr)">
+            <div class="metric"><div class="metric-label">Input RMS</div><div class="metric-value">${(qual.inputRMS*100).toFixed(2)}<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:2px">%</span></div></div>
+            <div class="metric"><div class="metric-label">Output RMS</div><div class="metric-value">${(qual.outputRMS*100).toFixed(2)}<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:2px">%</span></div></div>
+            <div class="metric"><div class="metric-label">Est. SNR</div><div class="metric-value">${qual.estimatedSNRDB}<span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:2px">dB</span></div></div>
+          </div>
+
+          <div style="margin-top:14px">
+            <details><summary>RAW JSON TELEMETRY</summary>
+            <pre class="json">${JSON.stringify({model:mod,performance:perf,quality:qual,vad:{...telemetry.vad,scores:'[...'+telemetry.vad.totalFrames+' frames]'}},null,2)}</pre>
+            </details>
+          </div>
+        </div>
+      </div>
+    `);
+
+    // Toggle expand with canvas rendering
+    let expanded = false;
+    document.querySelector('.tele-header').addEventListener('click', () => {
+      expanded = !expanded;
+      document.getElementById('teleExpanded').style.display = expanded ? '' : 'none';
+      document.querySelector('.tele-header span:last-child').textContent = expanded ? '▲ collapse' : '▼ expand';
+      if (expanded) {
+        setTimeout(() => {
+          drawVAD(document.getElementById('vadCanvas'), telemetry.vad.scores);
+          drawSpectrum(document.getElementById('inSpecCanvas'), inSpec);
+          drawSpectrum(document.getElementById('outSpecCanvas'), outSpec);
+        }, 20);
+      }
+    });
+
+    // Store for download
+    window._currentFile = file;
+
+  } catch(err) {
+    console.error(err);
+    setState(STATES.ERROR);
+    document.getElementById('main').insertAdjacentHTML('beforeend', `
+      <div class="error-banner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+        ${err.message || 'Processing failed — ensure the file is a valid audio format'}
+      </div>
+    `);
+  }
+}
+
+function downloadResult() {
+  if (!currentOutputURL || !window._currentFile) return;
+  const base = window._currentFile.name.replace(/\.[^/.]+$/,'');
+  const a = document.createElement('a');
+  a.href = currentOutputURL;
+  a.download = base+'_denoised.wav';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+</script>
+</body>
+</html>
